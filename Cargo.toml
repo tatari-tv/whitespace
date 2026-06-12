@@ -1,6 +1,6 @@
 [package]
 name = "whitespace"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["Scott A. Idler"]
 build = "build.rs"
