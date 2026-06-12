@@ -9,7 +9,7 @@ use whitespace::{Cli, RuntimeConfig};
 
 fn setup_logging() -> Result<()> {
     // Create log directory
-    let log_dir = dirs::data_local_dir()
+    let log_dir = whitespace::config::xdg_data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("whitespace")
         .join("logs");
