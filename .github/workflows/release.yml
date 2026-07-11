@@ -1,0 +1,126 @@
+name: release
+
+# Thin caller for the CLI release PLUS the whitespace-specific docker publish, in
+# ONE workflow on purpose (Phase 6, public-rust-ci fleet migration).
+#
+# The release half delegates cross-compile -> tarball + sha256 -> GitHub Release to
+# the shared public reusable; the binary, repo, and archive prefix are all
+# `whitespace`, so the reusable's defaults reproduce whitespace-<tag>-<suffix>
+# tarballs and whitespace-<suffix> upload artifacts with no overrides.
+#
+# The docker half MUST stay here as a `needs: release` job in the same workflow:
+# download-artifact@v4 is scoped to the run_id, and a reusable workflow runs inside
+# THIS caller's run, so this sibling job can download the per-target tarballs the
+# reusable uploaded. A separate docker-publish workflow on the same tag would be a
+# different run_id and could not see them. It downloads by ARTIFACT name
+# (whitespace-linux-amd64/-arm64), extracts the tarball into artifacts/<arch>/, and
+# feeds build-contexts: binaries=artifacts/.
+#
+# Tag-push trigger only (no workflow_dispatch): the reusable's publish job has no
+# tag-ref guard, so a manual dispatch on a branch would cut a Release named after
+# the branch.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  release:
+    uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@v1
+
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download Linux amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: whitespace-linux-amd64
+          path: artifacts/amd64/
+
+      - name: Download Linux arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: whitespace-linux-arm64
+          path: artifacts/arm64/
+
+      - name: Extract binaries
+        run: |
+          tar -xzvf artifacts/amd64/whitespace-${{ github.ref_name }}-linux-amd64.tar.gz -C artifacts/amd64/
+          tar -xzvf artifacts/arm64/whitespace-${{ github.ref_name }}-linux-arm64.tar.gz -C artifacts/arm64/
+          chmod +x artifacts/amd64/whitespace artifacts/arm64/whitespace
+          echo "=== amd64 binary ==="
+          file artifacts/amd64/whitespace
+          echo "=== arm64 binary ==="
+          file artifacts/arm64/whitespace
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=sha,prefix=sha-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-contexts: |
+            binaries=artifacts/
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Output image info
+        run: |
+          echo "## Docker Image Published :whale:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pull command:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
