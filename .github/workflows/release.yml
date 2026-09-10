@@ -48,13 +48,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download Linux amd64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: whitespace-linux-amd64
           path: artifacts/amd64/
 
       - name: Download Linux arm64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: whitespace-linux-arm64
           path: artifacts/arm64/
