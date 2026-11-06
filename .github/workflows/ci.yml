@@ -2,7 +2,7 @@ name: ci
 
 # Public repo: calls the PUBLIC reusable. tatari-tv/github-actions is internal and
 # a public repo cannot resolve reusable workflows/actions from it, so this uses the
-# public twin tatari-tv/github-actions-public. CI = `otto ci` via rust-ci.yml@v1;
+# public twin tatari-tv/github-actions-public. CI = `otto ci` via rust-ci.yml@v2.3.3;
 # the caller owns the trigger. Toolchain (1.96.0) and whitespace (v0.1.6) use the
 # reusable's defaults. rust-ci installs the released whitespace binary for its lint
 # step, so this repo's CI lints against the last released whitespace (benign
@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   ci:
-    uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@v1
-    with:
-      rust-version: "1.99.1"
+    # No rust-version: the repo's rust-toolchain.toml picks the toolchain, and this
+    # release installs clippy and rustfmt on whichever toolchain that is, and cargo-deny
+    # when the repo has a deny.toml.
+    uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@v2.3.3
