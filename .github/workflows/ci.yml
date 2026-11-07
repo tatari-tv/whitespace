@@ -21,4 +21,4 @@ jobs:
     # No rust-version: the repo's rust-toolchain.toml picks the toolchain, and this
     # release installs clippy and rustfmt on whichever toolchain that is, and cargo-deny
     # when the repo has a deny.toml.
-    uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@v2.3.3
+    uses: tatari-tv/github-actions-public/.github/workflows/rust-ci.yml@v2.3.4

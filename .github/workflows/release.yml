@@ -35,7 +35,7 @@ env:
 
 jobs:
   release:
-    uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@v2.3.3
+    uses: tatari-tv/github-actions-public/.github/workflows/rust-cli-release.yml@v2.3.4
 
   docker:
     needs: release
