@@ -1,6 +1,6 @@
 [package]
 name = "whitespace"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 authors = ["Scott A. Idler"]
 description = "A CLI application for removing trailing whitespace"
@@ -21,3 +21,6 @@ num_cpus = "1.16.0"
 
 [dev-dependencies]
 tempfile = "3.8.1"
+
+[build-dependencies]
+build-version = { git = "https://github.com/tatari-tv/build-version-rs", tag = "v0.1.0", version = "0.1.0" }
