@@ -1,9 +1,8 @@
 [package]
 name = "whitespace"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["Scott A. Idler"]
-build = "build.rs"
 description = "A CLI application for removing trailing whitespace"
 
 [dependencies]
@@ -22,6 +21,3 @@ num_cpus = "1.16.0"
 
 [dev-dependencies]
 tempfile = "3.8.1"
-
-[build-dependencies]
-# For build.rs if needed
