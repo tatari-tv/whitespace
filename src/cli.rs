@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[command(
     name = "whitespace",
     about = "Recursively remove trailing whitespace from files",
-    version = concat!("v", env!("CARGO_PKG_VERSION")),
+    version = env!("BUILD_VERSION"),
     after_help = "Logs are written to: ~/.local/share/whitespace/logs/whitespace.log"
 )]
 pub struct Cli {
