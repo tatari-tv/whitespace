@@ -1,6 +1,6 @@
 [package]
 name = "whitespace"
-version = "0.1.9"
+version = "0.2.0"
 edition = "2024"
 authors = ["Scott A. Idler"]
 description = "A CLI application for removing trailing whitespace"

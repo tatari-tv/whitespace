@@ -128,7 +128,12 @@ pub fn process_directory<F: FileSystem>(
 }
 
 /// Main application entry point. Returns Ok(()) on success.
-pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
+/// Returns the number of files that carry trailing whitespace.
+///
+/// Returned rather than only logged so `main` can turn it into an exit code:
+/// `--check` has to fail a build, and until it did, `lint` steps built on this
+/// tool could not fail at all. A plain run (or `--dry-run`) ignores the count.
+pub fn run(runtime_config: &RuntimeConfig) -> Result<usize> {
     info!("Starting whitespace removal application");
 
     let fs = Arc::new(RealFs);
@@ -184,7 +189,7 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
 
     if processed_dirs == 0 {
         println!("{}", "No valid directories found to process".yellow());
-        return Ok(());
+        return Ok(0);
     }
 
     // Log summary information
@@ -193,7 +198,7 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
     info!("  Files with changes: {}", total_files_with_changes);
     info!("  Files modified: {}", total_files_modified);
 
-    Ok(())
+    Ok(total_files_with_changes)
 }
 
 #[cfg(test)]

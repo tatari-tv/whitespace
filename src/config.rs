@@ -385,6 +385,12 @@ pub struct RuntimeConfig {
     pub directories: Vec<PathBuf>,
     /// Whether to perform a dry run
     pub dry_run: bool,
+    /// Whether this is a check run: report and exit non-zero, change nothing.
+    ///
+    /// Implies `dry_run`, so a check can never write. Kept as its own field
+    /// because the exit code differs: a dry run that finds work exits 0, a
+    /// check that finds work exits 1.
+    pub check: bool,
     /// Whether to process recursively
     pub recursive: bool,
     /// Number of threads to use
@@ -420,7 +426,8 @@ impl RuntimeConfig {
 
         Ok(Self {
             directories,
-            dry_run: cli.dry_run,
+            dry_run: cli.dry_run || cli.check,
+            check: cli.check,
             recursive: cli.recursive,
             threads,
             file_config,
@@ -437,6 +444,7 @@ mod runtime_config_tests {
             directories: vec![],
             config: None,
             dry_run: false,
+            check: false,
             verbose: false,
             recursive: true,
             threads: num_cpus::get(),
@@ -468,6 +476,24 @@ mod runtime_config_tests {
         };
         let config = RuntimeConfig::from_cli(&cli).unwrap();
         assert!(config.dry_run);
+    }
+
+    /// `--check` never writes, so it implies `dry_run`, and it keeps its own
+    /// flag because the exit code differs: a dry run that finds work exits 0, a
+    /// check that finds work exits 1.
+    #[test]
+    fn test_runtime_config_check_implies_dry_run() {
+        let cli = Cli {
+            check: true,
+            ..default_cli()
+        };
+        let config = RuntimeConfig::from_cli(&cli).unwrap();
+        assert!(config.check);
+        assert!(config.dry_run, "a check must never write");
+
+        let plain = RuntimeConfig::from_cli(&default_cli()).unwrap();
+        assert!(!plain.check);
+        assert!(!plain.dry_run);
     }
 
     #[test]
