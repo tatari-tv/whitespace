@@ -1,0 +1,81 @@
+//! End-to-end exit contract for `--check`: the gate mode lint steps rely on.
+
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Output};
+
+fn whitespace(args: &[&str], dir: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_whitespace"))
+        .args(args)
+        .arg(dir)
+        .output()
+        .expect("run whitespace")
+}
+
+#[test]
+fn clean_tree_check_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "clean\n").unwrap();
+    let out = whitespace(&["-r", "--check"], dir.path());
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[test]
+fn dirty_files_check_exits_one_with_count_and_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "trailing   \n").unwrap();
+    fs::write(dir.path().join("b.txt"), "also \n").unwrap();
+    fs::write(dir.path().join("c.txt"), "clean\n").unwrap();
+    let out = whitespace(&["-r", "--check"], dir.path());
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("2 file(s) carry trailing whitespace"), "{stderr}");
+    assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "trailing   \n");
+}
+
+#[test]
+fn plain_run_with_findings_fixes_and_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "trailing   \n").unwrap();
+    let out = whitespace(&["-r"], dir.path());
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "trailing\n");
+}
+
+#[test]
+fn missing_directory_check_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = whitespace(&["-r", "--check"], &dir.path().join("nope"));
+    assert_ne!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[test]
+fn missing_directory_plain_run_still_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = whitespace(&["-r"], &dir.path().join("nope"));
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[test]
+fn binary_file_is_skipped_not_failed() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("blob.bin"), b"\x00\x01binary  \n").unwrap();
+    let out = whitespace(&["-r", "--check"], dir.path());
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_file_check_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("locked.txt");
+    fs::write(&file, "clean\n").unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&file).is_ok() {
+        return; // running as root: permissions cannot make the file unreadable
+    }
+    let out = whitespace(&["-r", "--check"], dir.path());
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_ne!(out.status.code(), Some(0), "{out:?}");
+}
