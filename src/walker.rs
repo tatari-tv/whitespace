@@ -31,7 +31,9 @@ impl<F: FileSystem> FileWalker<F> {
         let mut errors = 0;
         let walker = if recursive { WalkDir::new(root) } else { WalkDir::new(root).max_depth(1) };
 
-        for entry in walker.into_iter() {
+        // Prune excluded paths before descending: an unreadable directory
+        // under `node_modules/` is never scanned, so it is not a scan failure.
+        for entry in walker.into_iter().filter_entry(|e| !self.is_excluded_path(e.path())) {
             match entry {
                 Ok(entry) => {
                     let path = entry.path();

@@ -79,8 +79,9 @@ fn missing_directory_plain_run_still_exits_zero() {
 
 #[test]
 fn binary_file_is_skipped_not_failed() {
+    // Not a default binary extension, so the processor's NUL-byte skip is under test.
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("blob.bin"), b"\x00\x01binary  \n").unwrap();
+    fs::write(dir.path().join("blob.raw"), b"\x00\x01binary  \n").unwrap();
     let out = whitespace(&["-r", "--check"], dir.path());
     assert_eq!(out.status.code(), Some(0), "{out:?}");
 }
@@ -125,4 +126,23 @@ fn unreadable_files_and_subdirectory_are_all_counted() {
         return; // running as root: permissions cannot make these unreadable
     }
     assert_scan_failure(&out, 0, 3);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_directory_under_an_excluded_path_is_not_counted() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "clean\n").unwrap();
+    let locked = dir.path().join("node_modules").join("pkg").join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    fs::write(locked.join("c.txt"), "clean\n").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = fs::read_dir(&locked).is_ok();
+    let out = whitespace(&["-r", "--check"], dir.path());
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    if readable {
+        return; // running as root: permissions cannot make the directory unreadable
+    }
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
 }

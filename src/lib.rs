@@ -130,8 +130,8 @@ pub fn process_directory<F: FileSystem>(
     Ok((files_with_changes, actual_files_modified, files_failed))
 }
 
-/// Main application entry point. Returns Ok(()) on success.
-/// Returns the number of files that carry trailing whitespace.
+/// Main application entry point. Returns the number of files that carry
+/// trailing whitespace, or `Err` under `--check` when the scan was incomplete.
 ///
 /// Returned rather than only logged so `main` can turn it into an exit code:
 /// `--check` has to fail a build, and until it did, `lint` steps built on this
