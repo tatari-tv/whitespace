@@ -103,12 +103,12 @@ pub fn process_directory<F: FileSystem>(
     let walker = FileWalker::new(Arc::clone(&file_config), Arc::clone(&fs));
 
     // Collect files
-    let files = walker
-        .collect_files(target_dir, runtime_config.recursive)
+    let (files, walk_errors) = walker
+        .collect_files_counted(target_dir, runtime_config.recursive)
         .with_context(|| format!("Failed to collect files from {}", target_dir.display()))?;
 
     if files.is_empty() {
-        return Ok((0, 0, 0));
+        return Ok((0, 0, walk_errors));
     }
 
     info!("Found {} files to process in {}", files.len(), target_dir.display());
@@ -125,7 +125,7 @@ pub fn process_directory<F: FileSystem>(
     // Display results to console for this directory
     let files_with_changes = display_results(&results.file_results, runtime_config.dry_run);
     let actual_files_modified = if runtime_config.dry_run { 0 } else { files_with_changes };
-    let files_failed = results.file_results.iter().filter(|(_, r)| r.is_failure()).count();
+    let files_failed = walk_errors + results.file_results.iter().filter(|(_, r)| r.is_failure()).count();
 
     Ok((files_with_changes, actual_files_modified, files_failed))
 }

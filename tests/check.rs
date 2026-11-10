@@ -42,11 +42,32 @@ fn plain_run_with_findings_fixes_and_exits_zero() {
     assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "trailing\n");
 }
 
+fn assert_scan_failure(out: &Output, dirs: usize, files: usize) {
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let want = format!("{dirs} director(ies) and {files} file(s) failed");
+    assert!(stderr.contains(&want), "want {want:?} in {stderr}");
+}
+
 #[test]
 fn missing_directory_check_fails() {
     let dir = tempfile::tempdir().unwrap();
     let out = whitespace(&["-r", "--check"], &dir.path().join("nope"));
-    assert_ne!(out.status.code(), Some(0), "{out:?}");
+    assert_scan_failure(&out, 1, 0);
+}
+
+#[test]
+fn every_failed_directory_is_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("plain.txt");
+    fs::write(&file, "clean\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_whitespace"))
+        .args(["-r", "--check"])
+        .arg(dir.path().join("nope"))
+        .arg(&file)
+        .output()
+        .expect("run whitespace");
+    assert_scan_failure(&out, 2, 0);
 }
 
 #[test]
@@ -77,5 +98,31 @@ fn unreadable_file_check_fails() {
     }
     let out = whitespace(&["-r", "--check"], dir.path());
     fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
-    assert_ne!(out.status.code(), Some(0), "{out:?}");
+    assert_scan_failure(&out, 0, 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_files_and_subdirectory_are_all_counted() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    let sub = dir.path().join("sub");
+    fs::write(&a, "clean\n").unwrap();
+    fs::write(&b, "clean\n").unwrap();
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("c.txt"), "clean\n").unwrap();
+    for p in [&a, &b, &sub] {
+        fs::set_permissions(p, fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    let readable = fs::read(&a).is_ok();
+    let out = whitespace(&["-r", "--check"], dir.path());
+    fs::set_permissions(&a, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::set_permissions(&b, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+    if readable {
+        return; // running as root: permissions cannot make these unreadable
+    }
+    assert_scan_failure(&out, 0, 3);
 }
