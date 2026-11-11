@@ -10,11 +10,25 @@ pub struct WhitespaceProcessor<F: FileSystem> {
     fs: Arc<F>,
 }
 
+/// `error` for a binary file: skipped on purpose, never a failed scan.
+pub const BINARY_SKIP: &str = "Binary file detected";
+/// `error` for a file that is not UTF-8: skipped on purpose, never a failed scan.
+pub const UTF8_SKIP: &str = "Invalid UTF-8 encoding";
+
 #[derive(Debug, Clone)]
 pub struct ProcessingResult {
     pub lines_modified: Vec<usize>,
     pub had_changes: bool,
     pub error: Option<String>,
+}
+
+impl ProcessingResult {
+    /// True when the file could not be scanned (a read or write error), as
+    /// opposed to the deliberate binary and invalid-UTF-8 skips. `--check`
+    /// fails on these: a scan that missed a file cannot vouch for it.
+    pub fn is_failure(&self) -> bool {
+        matches!(self.error.as_deref(), Some(e) if e != BINARY_SKIP && e != UTF8_SKIP)
+    }
 }
 
 impl<F: FileSystem> WhitespaceProcessor<F> {
@@ -45,7 +59,7 @@ impl<F: FileSystem> WhitespaceProcessor<F> {
             return Ok(ProcessingResult {
                 lines_modified: vec![],
                 had_changes: false,
-                error: Some("Binary file detected".to_string()),
+                error: Some(BINARY_SKIP.to_string()),
             });
         }
 
@@ -57,7 +71,7 @@ impl<F: FileSystem> WhitespaceProcessor<F> {
                 return Ok(ProcessingResult {
                     lines_modified: vec![],
                     had_changes: false,
-                    error: Some("Invalid UTF-8 encoding".to_string()),
+                    error: Some(UTF8_SKIP.to_string()),
                 });
             }
         };

@@ -21,6 +21,14 @@ pub struct Cli {
     #[arg(short = 'n', long, help = "Dry run - show files that would be modified")]
     pub dry_run: bool,
 
+    /// Report trailing whitespace and exit non-zero, changing nothing.
+    ///
+    /// `--dry-run` already lists what would change, but it exits 0 whether it
+    /// found anything or not, so it cannot gate a build. This is the same scan
+    /// with the exit code a CI step needs.
+    #[arg(long, help = "Report files with trailing whitespace and exit 1; changes nothing")]
+    pub check: bool,
+
     /// Enable verbose output
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,

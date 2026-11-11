@@ -17,12 +17,23 @@ impl<F: FileSystem> FileWalker<F> {
     }
 
     pub fn collect_files(&self, root: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
+        Ok(self.collect_files_counted(root, recursive)?.0)
+    }
+
+    /// Like `collect_files`, plus the count of entries the walk could not
+    /// read: a descendant it could not open, or an eligible file whose
+    /// metadata failed. Deliberate filters (exclusions, binary extensions,
+    /// size) are not counted. `--check` fails on a non-zero count.
+    pub fn collect_files_counted(&self, root: &Path, recursive: bool) -> Result<(Vec<PathBuf>, usize)> {
         debug!("Starting file collection from: {}", root.display());
 
         let mut files = Vec::new();
+        let mut errors = 0;
         let walker = if recursive { WalkDir::new(root) } else { WalkDir::new(root).max_depth(1) };
 
-        for entry in walker.into_iter() {
+        // Prune excluded paths before descending: an unreadable directory
+        // under `node_modules/` is never scanned, so it is not a scan failure.
+        for entry in walker.into_iter().filter_entry(|e| !self.is_excluded_path(e.path())) {
             match entry {
                 Ok(entry) => {
                     let path = entry.path();
@@ -38,40 +49,45 @@ impl<F: FileSystem> FileWalker<F> {
                         continue;
                     }
 
-                    if self.should_process_file(path) {
-                        debug!("Adding file for processing: {}", path.display());
-                        files.push(path.to_path_buf());
-                    } else {
-                        debug!("Filtering out file: {}", path.display());
+                    match self.should_process_file(path) {
+                        Some(true) => {
+                            debug!("Adding file for processing: {}", path.display());
+                            files.push(path.to_path_buf());
+                        }
+                        Some(false) => debug!("Filtering out file: {}", path.display()),
+                        None => errors += 1,
                     }
                 }
                 Err(e) => {
                     warn!("Error accessing path during walk: {}", e);
+                    errors += 1;
                 }
             }
         }
 
-        debug!("Collected {} files for processing", files.len());
-        Ok(files)
+        debug!("Collected {} files for processing, {} walk errors", files.len(), errors);
+        Ok((files, errors))
     }
 
-    fn should_process_file(&self, path: &Path) -> bool {
+    /// `Some(true)` to process, `Some(false)` for a deliberate filter, `None`
+    /// when the file's metadata could not be read.
+    fn should_process_file(&self, path: &Path) -> Option<bool> {
         // Check if path matches exclusion patterns
         if self.is_excluded_path(path) {
             debug!("Path excluded by exclude-paths pattern: {}", path.display());
-            return false;
+            return Some(false);
         }
 
         // Check if filename matches exclusion patterns
         if self.is_excluded_file(path) {
             debug!("File excluded by exclude-files pattern: {}", path.display());
-            return false;
+            return Some(false);
         }
 
         // Check if file has binary extension
         if self.has_binary_extension(path) {
             debug!("File excluded by binary extension: {}", path.display());
-            return false;
+            return Some(false);
         }
 
         // Check file size using FileSystem trait
@@ -79,16 +95,16 @@ impl<F: FileSystem> FileWalker<F> {
             Ok(metadata) => {
                 if metadata.len > self.config.processing.max_file_size {
                     debug!("File too large ({}): {}", metadata.len, path.display());
-                    return false;
+                    return Some(false);
                 }
             }
             Err(_) => {
                 warn!("Could not read metadata for: {}", path.display());
-                return false;
+                return None;
             }
         }
 
-        true
+        Some(true)
     }
 
     fn is_excluded_path(&self, path: &Path) -> bool {
@@ -168,6 +184,59 @@ mod tests {
 
     fn create_test_config() -> Arc<Config> {
         Arc::new(Config::default())
+    }
+
+    /// RealFs for everything except `metadata`, which always fails.
+    struct NoMetaFs;
+
+    impl FileSystem for NoMetaFs {
+        fn read(&self, path: &Path) -> Result<Vec<u8>> {
+            RealFs.read(path)
+        }
+        fn write(&self, path: &Path, content: &[u8]) -> Result<()> {
+            RealFs.write(path, content)
+        }
+        fn metadata(&self, path: &Path) -> Result<crate::ports::fs::FsMetadata> {
+            Err(eyre::eyre!("no metadata: {}", path.display()))
+        }
+        fn is_dir(&self, path: &Path) -> bool {
+            RealFs.is_dir(path)
+        }
+        fn is_file(&self, path: &Path) -> bool {
+            RealFs.is_file(path)
+        }
+        fn is_symlink(&self, path: &Path) -> bool {
+            RealFs.is_symlink(path)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            RealFs.exists(path)
+        }
+    }
+
+    #[test]
+    fn test_metadata_failure_is_counted_not_filtered() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("a.txt"), "content").unwrap();
+        fs::write(root.join("b.txt"), "content").unwrap();
+        fs::write(root.join("skip.png"), "content").unwrap();
+
+        let walker = FileWalker::new(create_test_config(), Arc::new(NoMetaFs));
+        let (files, errors) = walker.collect_files_counted(root, true).unwrap();
+        assert!(files.is_empty());
+        assert_eq!(
+            errors, 2,
+            "the two eligible files fail; the binary extension is a filter"
+        );
+    }
+
+    #[test]
+    fn test_clean_walk_counts_no_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("a.txt"), "content").unwrap();
+        let walker = FileWalker::new(create_test_config(), Arc::new(RealFs));
+        let (files, errors) = walker.collect_files_counted(temp_dir.path(), true).unwrap();
+        assert_eq!((files.len(), errors), (1, 0));
     }
 
     #[test]

@@ -57,7 +57,19 @@ fn main() -> Result<()> {
     let runtime_config = RuntimeConfig::from_cli(&cli).context("Failed to build runtime configuration")?;
 
     // Run the main application logic
-    whitespace::run(&runtime_config).context("Application failed")?;
+    let files_with_changes = whitespace::run(&runtime_config).context("Application failed")?;
+
+    // `--check` is the gate mode: report, change nothing, and fail. Without a
+    // non-zero exit here the tool could not gate anything, because both the
+    // normal run and `--dry-run` exit 0 whether they found trailing whitespace
+    // or not.
+    if runtime_config.check && files_with_changes > 0 {
+        eprintln!(
+            "whitespace: {} file(s) carry trailing whitespace; run `whitespace -r` to fix them",
+            files_with_changes
+        );
+        std::process::exit(1);
+    }
 
     Ok(())
 }

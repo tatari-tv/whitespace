@@ -13,7 +13,7 @@ pub use processor::{ProcessingResult, WhitespaceProcessor};
 pub use walker::FileWalker;
 
 use colored::*;
-use eyre::{Context, Result};
+use eyre::{Context, Result, bail};
 use log::info;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -87,12 +87,14 @@ pub fn display_results(file_results: &[(PathBuf, ProcessingResult)], is_dry_run:
     files_with_changes
 }
 
-/// Process a single directory and return (files_with_changes, files_modified).
+/// Process a single directory and return (files_with_changes, files_modified, files_failed).
+/// `files_failed` counts files that could not be read or written; the deliberate
+/// binary and invalid-UTF-8 skips are not failures.
 pub fn process_directory<F: FileSystem>(
     target_dir: &Path,
     runtime_config: &RuntimeConfig,
     fs: Arc<F>,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, usize)> {
     info!("Processing directory: {}", target_dir.display());
 
     let file_config = Arc::new(runtime_config.file_config.clone());
@@ -101,12 +103,12 @@ pub fn process_directory<F: FileSystem>(
     let walker = FileWalker::new(Arc::clone(&file_config), Arc::clone(&fs));
 
     // Collect files
-    let files = walker
-        .collect_files(target_dir, runtime_config.recursive)
+    let (files, walk_errors) = walker
+        .collect_files_counted(target_dir, runtime_config.recursive)
         .with_context(|| format!("Failed to collect files from {}", target_dir.display()))?;
 
     if files.is_empty() {
-        return Ok((0, 0));
+        return Ok((0, 0, walk_errors));
     }
 
     info!("Found {} files to process in {}", files.len(), target_dir.display());
@@ -123,12 +125,18 @@ pub fn process_directory<F: FileSystem>(
     // Display results to console for this directory
     let files_with_changes = display_results(&results.file_results, runtime_config.dry_run);
     let actual_files_modified = if runtime_config.dry_run { 0 } else { files_with_changes };
+    let files_failed = walk_errors + results.file_results.iter().filter(|(_, r)| r.is_failure()).count();
 
-    Ok((files_with_changes, actual_files_modified))
+    Ok((files_with_changes, actual_files_modified, files_failed))
 }
 
-/// Main application entry point. Returns Ok(()) on success.
-pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
+/// Main application entry point. Returns the number of files that carry
+/// trailing whitespace, or `Err` under `--check` when the scan was incomplete.
+///
+/// Returned rather than only logged so `main` can turn it into an exit code:
+/// `--check` has to fail a build, and until it did, `lint` steps built on this
+/// tool could not fail at all. A plain run (or `--dry-run`) ignores the count.
+pub fn run(runtime_config: &RuntimeConfig) -> Result<usize> {
     info!("Starting whitespace removal application");
 
     let fs = Arc::new(RealFs);
@@ -141,6 +149,10 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
     let mut total_files_with_changes = 0;
     let mut total_files_modified = 0;
     let mut processed_dirs = 0;
+    // Paths, not a counter: the message names them, and a push has no
+    // arithmetic for a mutant to flip on the arm no test can reach.
+    let mut failed_dirs: Vec<&Path> = Vec::new();
+    let mut failed_files = 0;
 
     // Process each directory
     for target_dir in &runtime_config.directories {
@@ -151,6 +163,7 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
                 "Directory does not exist:".red(),
                 target_dir.display().to_string().yellow()
             );
+            failed_dirs.push(target_dir);
             continue;
         }
 
@@ -161,13 +174,15 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
                 "Not a directory:".red(),
                 target_dir.display().to_string().yellow()
             );
+            failed_dirs.push(target_dir);
             continue;
         }
 
         match process_directory(target_dir, runtime_config, Arc::clone(&fs)) {
-            Ok((files_with_changes, files_modified)) => {
+            Ok((files_with_changes, files_modified, files_failed)) => {
                 total_files_with_changes += files_with_changes;
                 total_files_modified += files_modified;
+                failed_files += files_failed;
                 processed_dirs += 1;
             }
             Err(e) => {
@@ -178,13 +193,29 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
                     target_dir.display().to_string().yellow(),
                     e
                 );
+                failed_dirs.push(target_dir);
             }
         }
     }
 
+    // A check that could not scan everything cannot report the tree clean.
+    if runtime_config.check && (!failed_dirs.is_empty() || failed_files > 0) {
+        let names: Vec<String> = failed_dirs.iter().map(|d| d.display().to_string()).collect();
+        bail!(
+            "--check could not scan everything: {} director(ies) and {} file(s) failed{}",
+            failed_dirs.len(),
+            failed_files,
+            if names.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", names.join(", "))
+            }
+        );
+    }
+
     if processed_dirs == 0 {
         println!("{}", "No valid directories found to process".yellow());
-        return Ok(());
+        return Ok(0);
     }
 
     // Log summary information
@@ -193,7 +224,7 @@ pub fn run(runtime_config: &RuntimeConfig) -> Result<()> {
     info!("  Files with changes: {}", total_files_with_changes);
     info!("  Files modified: {}", total_files_modified);
 
-    Ok(())
+    Ok(total_files_with_changes)
 }
 
 #[cfg(test)]
